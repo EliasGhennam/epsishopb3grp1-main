@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:epsi_shop/bo/cart.dart';
+import 'package:http/http.dart' as http;
 
 class CartPage extends StatelessWidget {
   const CartPage({super.key});
@@ -14,6 +16,10 @@ class CartPage extends StatelessWidget {
           if (cart.getTotalQuantity() == 0) {
             return const Center(child: Text("Votre panier est vide."));
           }
+
+          double totalHT = cart.getTotalPriceWithoutTax();
+          double totalTTC = cart.getTotalPriceWithTax();
+          double tva = totalTTC - totalHT;
 
           return Column(
             children: [
@@ -46,14 +52,22 @@ class CartPage extends StatelessWidget {
                 ),
               ),
 
-              /// 📌 **Total du panier**
+              /// 📌 **Total du panier avec TVA**
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   children: [
                     Text(
-                      "Total: ${cart.getTotalPrice().toStringAsFixed(2)}€",
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      "Sous-total: ${totalHT.toStringAsFixed(2)}€",
+                      style: const TextStyle(fontSize: 18),
+                    ),
+                    Text(
+                      "TVA (20%): ${tva.toStringAsFixed(2)}€",
+                      style: const TextStyle(fontSize: 18, color: Colors.orange),
+                    ),
+                    Text(
+                      "Total TTC: ${totalTTC.toStringAsFixed(2)}€",
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
                     ),
                     const SizedBox(height: 10),
 
@@ -69,11 +83,11 @@ class CartPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
 
-                    /// 📌 **Bouton "Procéder au paiement"** (Visible seulement si le panier n'est pas vide)
+                    /// 📌 **Bouton "Procéder au paiement"**
                     if (cart.getTotalQuantity() > 0)
                       ElevatedButton(
                         onPressed: () {
-                          _showPaymentDialog(context);
+                          _processPayment(cart, context);
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green, // Couleur verte pour paiement
@@ -93,7 +107,38 @@ class CartPage extends StatelessWidget {
     );
   }
 
-  /// 📌 **Afficher un message de confirmation après paiement**
+  /// 📌 **Envoyer une requête d'achat lors du paiement**
+  void _processPayment(Cart cart, BuildContext context) async {
+    String apiUrl1 = "http://ptsv3.com/t/EPSISHOPC1/";
+    String apiUrl2 = "http://ptsv3.com/t/EPSISHOPC2/";
+
+    Map<String, dynamic> orderData = {
+      "total_ht": cart.getTotalPriceWithoutTax(),
+      "tva": cart.getTotalPriceWithTax() - cart.getTotalPriceWithoutTax(),
+      "total_ttc": cart.getTotalPriceWithTax(),
+      "products": cart.getAllProducts().map((product) {
+        return {
+          "id": product.id,
+          "title": product.title,
+          "price": product.price,
+          "quantity": cart.getQuantity(product.id),
+        };
+      }).toList(),
+    };
+
+    String jsonOrder = jsonEncode(orderData);
+
+    try {
+      await http.post(Uri.parse(apiUrl1), body: jsonOrder, headers: {"Content-Type": "application/json"});
+      await http.post(Uri.parse(apiUrl2), body: jsonOrder, headers: {"Content-Type": "application/json"});
+
+      _showPaymentDialog(context);
+      cart.clearCart();
+    } catch (e) {
+      print("Erreur lors du paiement: $e");
+    }
+  }
+
   void _showPaymentDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -105,7 +150,6 @@ class CartPage extends StatelessWidget {
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                Provider.of<Cart>(context, listen: false).clearCart(); // Vider le panier après paiement
               },
               child: const Text("OK"),
             ),
