@@ -57,18 +57,12 @@ class CartPage extends StatelessWidget {
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   children: [
-                    Text(
-                      "Sous-total: ${totalHT.toStringAsFixed(2)}€",
-                      style: const TextStyle(fontSize: 18),
-                    ),
-                    Text(
-                      "TVA (20%): ${tva.toStringAsFixed(2)}€",
-                      style: const TextStyle(fontSize: 18, color: Colors.orange),
-                    ),
-                    Text(
-                      "Total TTC: ${totalTTC.toStringAsFixed(2)}€",
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
-                    ),
+                    Text("Sous-total: ${totalHT.toStringAsFixed(2)}€",
+                        style: const TextStyle(fontSize: 18)),
+                    Text("TVA (20%): ${tva.toStringAsFixed(2)}€",
+                        style: const TextStyle(fontSize: 18, color: Colors.orange)),
+                    Text("Total TTC: ${totalTTC.toStringAsFixed(2)}€",
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green)),
                     const SizedBox(height: 10),
 
                     /// 📌 **Bouton "Vider le panier"**
@@ -87,10 +81,10 @@ class CartPage extends StatelessWidget {
                     if (cart.getTotalQuantity() > 0)
                       ElevatedButton(
                         onPressed: () {
-                          _processPayment(cart, context);
+                          _startPaymentAnimation(context, cart);
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green, // Couleur verte pour paiement
+                          backgroundColor: Colors.green,
                         ),
                         child: const Text(
                           "Procéder au paiement",
@@ -107,8 +101,37 @@ class CartPage extends StatelessWidget {
     );
   }
 
-  /// 📌 **Envoyer une requête d'achat lors du paiement**
-  void _processPayment(Cart cart, BuildContext context) async {
+  /// 📌 **Déclencher l'animation de paiement et envoyer les requêtes en parallèle**
+  void _startPaymentAnimation(BuildContext context, Cart cart) {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Empêche la fermeture tant que l'animation est en cours
+      builder: (BuildContext context) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 20),
+              const Text("Traitement du paiement...", style: TextStyle(fontSize: 18)),
+            ],
+          ),
+        );
+      },
+    );
+
+    // **Lancer les requêtes POST en arrière-plan**
+    _sendPaymentRequest(cart);
+
+    // **Attendre 3 secondes pour simuler une animation de paiement**
+    Future.delayed(const Duration(seconds: 3), () {
+      Navigator.of(context).pop(); // Ferme l'animation
+      _showPaymentConfirmationDialog(context, cart);
+    });
+  }
+
+  /// 📌 **Envoyer la requête d'achat aux deux serveurs en parallèle**
+  void _sendPaymentRequest(Cart cart) async {
     String apiUrl1 = "http://ptsv3.com/t/EPSISHOPC1/";
     String apiUrl2 = "http://ptsv3.com/t/EPSISHOPC2/";
 
@@ -129,27 +152,36 @@ class CartPage extends StatelessWidget {
     String jsonOrder = jsonEncode(orderData);
 
     try {
-      await http.post(Uri.parse(apiUrl1), body: jsonOrder, headers: {"Content-Type": "application/json"});
-      await http.post(Uri.parse(apiUrl2), body: jsonOrder, headers: {"Content-Type": "application/json"});
-
-      _showPaymentDialog(context);
-      cart.clearCart();
+      // **Lancer les requêtes en parallèle**
+      await Future.wait([
+        http.post(Uri.parse(apiUrl1), body: jsonOrder, headers: {"Content-Type": "application/json"}),
+        http.post(Uri.parse(apiUrl2), body: jsonOrder, headers: {"Content-Type": "application/json"}),
+      ]);
     } catch (e) {
-      print("Erreur lors du paiement: $e");
+      print("Erreur lors de l'envoi du paiement: $e");
     }
   }
 
-  void _showPaymentDialog(BuildContext context) {
+  /// 📌 **Afficher une animation de confirmation de paiement après le délai**
+  void _showPaymentConfirmationDialog(BuildContext context, Cart cart) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text("Paiement confirmé"),
-          content: const Text("Votre commande a été traitée avec succès !"),
+          title: const Text("Paiement réussi"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green, size: 50),
+              const SizedBox(height: 10),
+              const Text("Votre commande a été validée avec succès !"),
+            ],
+          ),
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.of(context).pop();
+                Navigator.of(context).pop(); // Fermer le dialogue
+                cart.clearCart(); // **Vider le panier après paiement**
               },
               child: const Text("OK"),
             ),
